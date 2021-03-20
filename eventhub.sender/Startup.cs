@@ -3,10 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using Azure.Storage.Blobs;
 using Azure.Messaging.EventHubs;
-using Azure.Messaging.EventHubs.Consumer;
-using Azure.Messaging.EventHubs.Processor;
+using Azure.Messaging.EventHubs.Producer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.HttpsPolicy;
@@ -17,7 +15,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.OpenApi.Models;
 
-namespace eventhub.receiver
+namespace eventhub.sender
 {
     public class Startup
     {
@@ -27,24 +25,27 @@ namespace eventhub.receiver
         }
 
         public IConfiguration Configuration { get; }
-        private EventProcessorClient _processor;
 
-        private void ConfigureEventHubProcessor()
+        private async Task ConfigureEventHub()
         {
-             // Read from the default consumer group: $Default
-            string consumerGroup = EventHubConsumerClient.DefaultConsumerGroupName;
-            string _blobStorageConnectionString = Configuration["AzureBlob:ConnectionString"];
-            string _blobContainerName = Configuration["AzureBlob:ContainerName"];
-            string _ehubNamespaceConnectionString = Configuration["EventHub:ConnectionString"];
+            string _eventHubConnectionString = Configuration["EventHub:ConnectionString"];
             string _eventHubName = Configuration["EventHub:Name"];
+            // Create a producer client that you can use to send events to an event hub
+            await using (var producerClient = new EventHubProducerClient(_eventHubConnectionString, _eventHubName))
+            {
+                // Create a batch of events 
+                using EventDataBatch eventBatch = await producerClient.CreateBatchAsync();
 
-            // Create a blob container client that the event processor will use 
-            BlobContainerClient storageClient = new BlobContainerClient(_blobStorageConnectionString, _blobContainerName);
+                // Add events to the batch. An event is a represented by a collection of bytes and metadata. 
+                eventBatch.TryAdd(new EventData(Encoding.UTF8.GetBytes("First event")));
+                eventBatch.TryAdd(new EventData(Encoding.UTF8.GetBytes("Second event")));
+                eventBatch.TryAdd(new EventData(Encoding.UTF8.GetBytes("Third event")));
 
-            // Create an event processor client to process events in the event hub
-            _processor = new EventProcessorClient(storageClient, consumerGroup, _ehubNamespaceConnectionString, _eventHubName);
+                // Use the producer client to send the batch of events to the event hub
+                await producerClient.SendAsync(eventBatch);
+                Console.WriteLine("A batch of 3 events has been published.");
+            }
         }
-
         // This method gets called by the runtime. Use this method to add services to the container.
         public void ConfigureServices(IServiceCollection services)
         {
@@ -52,9 +53,10 @@ namespace eventhub.receiver
             services.AddControllers();
             services.AddSwaggerGen(c =>
             {
-                c.SwaggerDoc("v1", new OpenApiInfo { Title = "eventhub.receiver", Version = "v1" });
+                c.SwaggerDoc("v1", new OpenApiInfo { Title = "eventhub.sender", Version = "v1" });
             });
-            ConfigureEventHubProcessor();
+            ConfigureEventHub();
+
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
@@ -64,7 +66,7 @@ namespace eventhub.receiver
             {
                 app.UseDeveloperExceptionPage();
                 app.UseSwagger();
-                app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "eventhub.receiver v1"));
+                app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "eventhub.sender v1"));
             }
 
             app.UseHttpsRedirection();
