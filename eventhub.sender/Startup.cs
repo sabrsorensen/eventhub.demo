@@ -14,9 +14,35 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.OpenApi.Models;
+using Newtonsoft.Json;
 
 namespace eventhub.sender
 {
+    public interface IMessageProducer<T>
+    {
+        Task Send(T payload);
+    }
+
+    public class EventHubMessageProducer<T> : IMessageProducer<T>
+    {
+        private readonly EventHubProducerClient _producerClient;
+        public EventHubMessageProducer(EventHubProducerClient producerClient)
+        {
+            _producerClient = producerClient;
+        }
+        public async Task Send(T payload)
+        {
+            var serializedPayload = JsonConvert.SerializeObject(payload);
+            using EventDataBatch eventBatch = await _producerClient.CreateBatchAsync();
+
+            // Add events to the batch. An event is a represented by a collection of bytes and metadata. 
+            eventBatch.TryAdd(new EventData(Encoding.UTF8.GetBytes(serializedPayload)));
+
+            // Use the producer client to send the batch of events to the event hub
+            await _producerClient.SendAsync(eventBatch);
+        }
+    }
+
     public class Startup
     {
         public Startup(IConfiguration configuration)
@@ -28,22 +54,15 @@ namespace eventhub.sender
 
         private async Task ConfigureEventHub()
         {
-            string _eventHubConnectionString = Configuration["EventHub:ConnectionString"];
+            //string _eventHubConnectionString = Configuration["EventHub:ConnectionString"];
+            string _eventHubConnectionString = Configuration["EventHub:DirectConnectionString"];
             string _eventHubName = Configuration["EventHub:Name"];
             // Create a producer client that you can use to send events to an event hub
             await using (var producerClient = new EventHubProducerClient(_eventHubConnectionString, _eventHubName))
             {
-                // Create a batch of events 
-                using EventDataBatch eventBatch = await producerClient.CreateBatchAsync();
-
-                // Add events to the batch. An event is a represented by a collection of bytes and metadata. 
-                eventBatch.TryAdd(new EventData(Encoding.UTF8.GetBytes("First event")));
-                eventBatch.TryAdd(new EventData(Encoding.UTF8.GetBytes("Second event")));
-                eventBatch.TryAdd(new EventData(Encoding.UTF8.GetBytes("Third event")));
-
-                // Use the producer client to send the batch of events to the event hub
-                await producerClient.SendAsync(eventBatch);
-                Console.WriteLine("A batch of 3 events has been published.");
+                var dumb = new { Id = "1", Name = "Jerry", Impact = 1.10m, Test = true };
+                var messageProducer = new EventHubMessageProducer<Object>(producerClient);
+                await messageProducer.Send(dumb);
             }
         }
         // This method gets called by the runtime. Use this method to add services to the container.
@@ -55,8 +74,7 @@ namespace eventhub.sender
             {
                 c.SwaggerDoc("v1", new OpenApiInfo { Title = "eventhub.sender", Version = "v1" });
             });
-            ConfigureEventHub();
-
+            ConfigureEventHub().Wait();
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.

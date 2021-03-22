@@ -43,6 +43,20 @@ namespace eventhub.receiver
 
             // Create an event processor client to process events in the event hub
             _processor = new EventProcessorClient(storageClient, consumerGroup, _ehubNamespaceConnectionString, _eventHubName);
+            _processor.ProcessEventAsync += _processor_ProcessEventAsync;
+            _processor.ProcessErrorAsync += _processor_ProcessErrorAsync;
+            _processor.StartProcessing();
+        }
+
+        private Task _processor_ProcessErrorAsync(ProcessErrorEventArgs arg)
+        {
+            return Task.CompletedTask;
+        }
+
+        private async Task _processor_ProcessEventAsync(ProcessEventArgs arg)
+        {
+            var eventData = arg.Data.EventBody.ToString();
+            await arg.UpdateCheckpointAsync();
         }
 
         // This method gets called by the runtime. Use this method to add services to the container.
